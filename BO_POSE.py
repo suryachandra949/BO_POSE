@@ -232,16 +232,20 @@ def run_application(
         # 4. Verify replay
         # ====================================================
 
-        if not result.verified:
+        if result.verification_performed and not result.verified:
             raise RuntimeError(
-                f"Mneme replay failed for {params}. "
-                f"Error: {result.error}"
-            )
+            f"Mneme replay verification failed for {params}. "
+            f"Error: {result.error}"
+        )
 
         # ====================================================
         # 5. Runtime
         # ====================================================
-
+        if not result.exec_time:
+            raise RuntimeError(
+                f"Mneme returned no execution times for {params}"
+            )
+        
         runtime = statistics.mean(
             result.exec_time
         )
@@ -261,14 +265,6 @@ def run_application(
                 "Mneme did not return mean_energy_mj"
             )
 
-        # Handle list/tuple if necessary
-        if isinstance(
-            energy_mj,
-            (list, tuple),
-        ):
-            energy_mj = statistics.mean(
-                energy_mj
-            )
 
         # Mneme mJ -> Joules
         energy_j = float(
@@ -445,6 +441,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Kernel instance id (dynamic hash) to operate on.",
     )
 
+    p.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip Mneme replay-state verification.",
+    )
+
     return p.parse_args(argv)
 
 
@@ -479,7 +481,7 @@ def format_x(X: torch.Tensor) -> str:
 
 
 
-def select_initial_reference_by_metric(
+def select_best_reference_by_metric(
     train_X: torch.Tensor,
     runtime_Y: torch.Tensor,
     energy_Y: torch.Tensor,
@@ -922,6 +924,8 @@ def main(argv: list[str]) -> int:
         iterations=5,
         results_db_dir="./results",
         num_workers=1,
+        verify=not args.no_verify,
+        warmup=0,
     )
 
     try:
@@ -947,7 +951,7 @@ def main(argv: list[str]) -> int:
             selected_runtime_reference,
             selected_reference_energy,
             selected_reference_metric,
-        ) = select_initial_reference_by_metric(
+        ) = select_best_reference_by_metric(
             train_X,
             runtime_Y,
             energy_Y,
@@ -957,7 +961,7 @@ def main(argv: list[str]) -> int:
             n,
             m,
         )
-        
+
         point = {}
         point["energy"] = selected_reference_energy
         point["runtime"] = selected_runtime_reference 
@@ -1006,11 +1010,21 @@ def main(argv: list[str]) -> int:
                 if runtime_candidate.probability < 0.5 :
 
 
-                    (runtime_reference_idx,
-                    selected_runtime_reference,
-                    selected_reference_energy,
-                    selected_reference_edp,) = select_initial_reference_by_edp(train_X,runtime_Y, energy_Y,)
-
+                    (
+                        reference_idx,
+                        selected_runtime_reference,
+                        selected_reference_energy,
+                        selected_reference_metric,
+                    ) = select_best_reference_by_metric(
+                        train_X,
+                        runtime_Y,
+                        energy_Y,
+                        metric,
+                        alpha,
+                        beta,
+                        n,
+                        m,
+                    )
                     point["energy"] = selected_reference_energy
                     point["runtime"] = selected_runtime_reference 
 
